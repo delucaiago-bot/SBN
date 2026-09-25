@@ -1,0 +1,31 @@
+# Aviso push de nueva versión: al publicar una release, se manda un mensaje de Firebase Cloud
+# Messaging al tema "actualizaciones", al que están suscritas todas las apps SBN Técnicos.
+# Necesita el secreto FIREBASE_SERVICE_ACCOUNT (JSON de la cuenta de servicio de Firebase).
+name: Aviso de nueva versión
+
+on:
+  release:
+    types: [published]
+  # Para reenviar el aviso de una versión a mano desde la pestaña Actions.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Versión (por ejemplo v1.0.9)"
+        required: true
+
+jobs:
+  aviso:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github/scripts
+      - name: Enviar aviso a los móviles
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: node .github/scripts/enviar-aviso.js
