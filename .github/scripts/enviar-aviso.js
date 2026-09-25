@@ -44,7 +44,8 @@ async function accessToken(sa) {
 
 async function main() {
   if (!process.env.FIREBASE_SERVICE_ACCOUNT) throw new Error('Falta el secreto FIREBASE_SERVICE_ACCOUNT');
-  const sa = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+  // Sin la marca BOM que añaden algunos editores/terminales de Windows al principio del texto.
+  const sa = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT.replace(/^﻿/, '').trim());
   const r = release(process.env.TAG);
   console.log(`Aviso de la versión ${r.versionName} (código ${r.versionCode})`);
 
