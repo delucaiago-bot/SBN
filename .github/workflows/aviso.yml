@@ -7,9 +7,10 @@ name: Aviso de nueva versión
 
 on:
   release:
-    # "prereleased": se publica una pre-release. "released": se publica una normal o una
-    # pre-release pasa a normal. Así cada versión avisa una vez por canal.
-    types: [prereleased, released]
+    # "published" salta con cualquier versión publicada; "released" con una normal o una
+    # pre-release que pasa a normal. El "if" del job deja un solo aviso por versión y canal:
+    # pre-release -> por "published"; normal o promocionada -> por "released".
+    types: [published, released]
   # Para reenviar el aviso de una versión a mano desde la pestaña Actions.
   workflow_dispatch:
     inputs:
@@ -19,6 +20,10 @@ on:
 
 jobs:
   aviso:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.action == 'released' ||
+      (github.event.action == 'published' && github.event.release.prerelease)
     runs-on: ubuntu-latest
     permissions:
       contents: read
