@@ -1,11 +1,15 @@
-# Aviso push de nueva versión: al publicar una release, se manda un mensaje de Firebase Cloud
-# Messaging al tema "actualizaciones", al que están suscritas todas las apps SBN Técnicos.
+# Aviso push de nueva versión, con dos canales:
+# - Pre-release publicada (canal de pruebas) -> tema "actualizaciones-pruebas" (solo móviles con
+#   el canal de pruebas activado).
+# - Release normal publicada, o pre-release que se pasa a normal -> tema "actualizaciones" (todos).
 # Necesita el secreto FIREBASE_SERVICE_ACCOUNT (JSON de la cuenta de servicio de Firebase).
 name: Aviso de nueva versión
 
 on:
   release:
-    types: [published]
+    # "prereleased": se publica una pre-release. "released": se publica una normal o una
+    # pre-release pasa a normal. Así cada versión avisa una vez por canal.
+    types: [prereleased, released]
   # Para reenviar el aviso de una versión a mano desde la pestaña Actions.
   workflow_dispatch:
     inputs:
