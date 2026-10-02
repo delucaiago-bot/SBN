@@ -1,0 +1,47 @@
+# Publicación programada: la versión TAG está subida como borrador (invisible para la app) y este
+# workflow la publica como versión para todos a la hora PUBLICAR_A y manda el aviso push.
+# Los workflows programados de GitHub pueden arrancar con retraso: se lanza un rato antes y espera.
+# Las releases publicadas con el token del workflow no disparan aviso.yml, por eso el aviso se
+# manda aquí mismo.
+name: Publicación programada
+
+on:
+  schedule:
+    - cron: "40 6 5 10 *"   # 5 de octubre, 06:40 UTC (08:40 en Galicia)
+  workflow_dispatch:
+
+jobs:
+  publicar:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      TAG: v1.1.9
+      PUBLICAR_A: "2026-10-05T07:00:00Z"   # lunes 5/10/2026 a las 9:00 en Galicia
+    steps:
+      - name: Esperar a la hora
+        run: |
+          objetivo=$(date -d "$PUBLICAR_A" +%s); ahora=$(date +%s)
+          if [ "$ahora" -lt $((objetivo - 3600)) ]; then
+            echo "Todavía no es la hora de publicar ($PUBLICAR_A)"; echo "SALTAR=1" >> "$GITHUB_ENV"; exit 0
+          fi
+          if [ "$ahora" -lt "$objetivo" ]; then sleep $((objetivo - ahora)); fi
+      - name: Publicar la versión
+        if: env.SALTAR != '1'
+        run: |
+          if [ "$(gh release view "$TAG" --repo "$REPO" --json isDraft --jq .isDraft)" != "true" ]; then
+            echo "$TAG ya no es un borrador: no se hace nada"; echo "SALTAR=1" >> "$GITHUB_ENV"; exit 0
+          fi
+          gh release edit "$TAG" --repo "$REPO" --draft=false --latest
+          echo "Publicada $TAG"
+      - uses: actions/checkout@v4
+        if: env.SALTAR != '1'
+        with:
+          sparse-checkout: .github/scripts
+      - name: Enviar aviso a los móviles
+        if: env.SALTAR != '1'
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: node .github/scripts/enviar-aviso.js
