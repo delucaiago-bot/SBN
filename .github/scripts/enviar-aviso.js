@@ -4,15 +4,17 @@
 const crypto = require('crypto');
 const { execFileSync } = require('child_process');
 
+// Releases normales: todos. Pre-releases (canal de pruebas): solo los móviles con ese canal activado.
 const TOPIC = 'actualizaciones';
+const TOPIC_BETA = 'actualizaciones-pruebas';
 const ASSET = /^sbn-tecnicos-(.+)-(\d+)\.apk$/;
 
 function release(tag) {
   // Al publicar, los APK pueden tardar unos segundos en aparecer: se reintenta.
   for (let i = 0; i < 10; i++) {
-    const r = JSON.parse(execFileSync('gh', ['release', 'view', tag, '--repo', process.env.REPO, '--json', 'assets,body']).toString());
+    const r = JSON.parse(execFileSync('gh', ['release', 'view', tag, '--repo', process.env.REPO, '--json', 'assets,body,isPrerelease']).toString());
     const apk = r.assets.map(a => a.name.match(ASSET)).find(Boolean);
-    if (apk) return { versionName: apk[1], versionCode: apk[2], notes: r.body || '' };
+    if (apk) return { versionName: apk[1], versionCode: apk[2], notes: r.body || '', prerelease: !!r.isPrerelease };
     execFileSync('sleep', ['6']);
   }
   throw new Error(`La release ${tag} no tiene un APK sbn-tecnicos-<versión>-<código>.apk`);
@@ -47,14 +49,15 @@ async function main() {
   // Sin la marca BOM que añaden algunos editores/terminales de Windows al principio del texto.
   const sa = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT.replace(/^﻿/, '').trim());
   const r = release(process.env.TAG);
-  console.log(`Aviso de la versión ${r.versionName} (código ${r.versionCode})`);
+  const topic = r.prerelease ? TOPIC_BETA : TOPIC;
+  console.log(`Aviso de la versión ${r.versionName} (código ${r.versionCode}) al tema ${topic}`);
 
   const res = await fetch(`https://fcm.googleapis.com/v1/projects/${sa.project_id}/messages:send`, {
     method: 'POST',
     headers: { Authorization: 'Bearer ' + (await accessToken(sa)), 'Content-Type': 'application/json' },
     body: JSON.stringify({
       message: {
-        topic: TOPIC,
+        topic,
         // Mensaje de datos: la app decide si avisa (solo si es más nueva que la instalada).
         data: { type: 'update', versionCode: r.versionCode, versionName: r.versionName, notes: r.notes.slice(0, 2000) },
         // Alta prioridad para que llegue aunque el móvil esté en reposo; se guarda hasta 4 semanas.
