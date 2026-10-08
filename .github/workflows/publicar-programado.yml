@@ -1,14 +1,23 @@
-# Publicación programada: la versión TAG está subida como borrador (invisible para la app) y este
-# workflow la publica como versión para todos a la hora PUBLICAR_A y manda el aviso push.
-# Los workflows programados de GitHub pueden arrancar con retraso: se lanza un rato antes y espera.
-# Las releases publicadas con el token del workflow no disparan aviso.yml, por eso el aviso se
-# manda aquí mismo.
+# Publicación programada: la versión TAG (borrador o pre-release del canal de pruebas) pasa a ser
+# la versión para todos a la hora PUBLICAR_A y se manda el aviso push.
+#
+# Los workflows programados de GitHub pueden arrancar con mucho retraso (el 5/10/2026 uno de las
+# 06:40 arrancó a las 15:15), así que:
+# - Hay varios intentos antes de la hora (esperan hasta PUBLICAR_A) y reintentos cada hora después.
+# - También se puede lanzar a mano o desde una tarea de Windows (workflow_dispatch).
+# - Solo publica una vez: si la versión ya es la de todos, no hace nada.
+# Las releases editadas con el token del workflow no disparan aviso.yml: el aviso se manda aquí.
 name: Publicación programada
 
 on:
   schedule:
-    - cron: "40 6 5 10 *"   # 5 de octubre, 06:40 UTC (08:40 en Galicia)
+    - cron: "5,25,45 5 9 10 *"   # 9/10, 07:05-07:45 en Galicia: esperan hasta las 08:00
+    - cron: "10 6-20 9 10 *"     # reintentos cada hora ese día, por si GitHub se retrasa
   workflow_dispatch:
+
+concurrency:
+  group: publicar-programado
+  cancel-in-progress: false
 
 jobs:
   publicar:
@@ -18,8 +27,8 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       REPO: ${{ github.repository }}
-      TAG: v1.1.9
-      PUBLICAR_A: "2026-10-05T07:00:00Z"   # lunes 5/10/2026 a las 9:00 en Galicia
+      TAG: v1.3.1
+      PUBLICAR_A: "2026-10-09T06:00:00Z"   # viernes 9/10/2026 a las 8:00 en Galicia
     steps:
       - name: Esperar a la hora
         run: |
@@ -28,14 +37,15 @@ jobs:
             echo "Todavía no es la hora de publicar ($PUBLICAR_A)"; echo "SALTAR=1" >> "$GITHUB_ENV"; exit 0
           fi
           if [ "$ahora" -lt "$objetivo" ]; then sleep $((objetivo - ahora)); fi
-      - name: Publicar la versión
+      - name: Publicar la versión para todos
         if: env.SALTAR != '1'
         run: |
-          if [ "$(gh release view "$TAG" --repo "$REPO" --json isDraft --jq .isDraft)" != "true" ]; then
-            echo "$TAG ya no es un borrador: no se hace nada"; echo "SALTAR=1" >> "$GITHUB_ENV"; exit 0
+          estado=$(gh release view "$TAG" --repo "$REPO" --json isDraft,isPrerelease --jq '"\(.isDraft) \(.isPrerelease)"')
+          if [ "$estado" = "false false" ]; then
+            echo "$TAG ya es la versión para todos: no se hace nada"; echo "SALTAR=1" >> "$GITHUB_ENV"; exit 0
           fi
-          gh release edit "$TAG" --repo "$REPO" --draft=false --latest
-          echo "Publicada $TAG"
+          gh release edit "$TAG" --repo "$REPO" --draft=false --prerelease=false --latest
+          echo "Publicada $TAG para todos"
       - uses: actions/checkout@v4
         if: env.SALTAR != '1'
         with:
