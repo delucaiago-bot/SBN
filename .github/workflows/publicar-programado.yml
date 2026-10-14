@@ -1,57 +1,70 @@
-# Publicación programada: la versión TAG (borrador o pre-release del canal de pruebas) pasa a ser
-# la versión para todos a la hora PUBLICAR_A y se manda el aviso push.
+# Publicación programada: la versión `tag` (borrador o pre-release del canal de pruebas) pasa a
+# ser la versión para todos a la hora `hora` y se manda el aviso push.
 #
-# Los workflows programados de GitHub pueden arrancar con mucho retraso (el 5/10/2026 uno de las
-# 06:40 arrancó a las 15:15), así que:
-# - Hay varios intentos antes de la hora (esperan hasta PUBLICAR_A) y reintentos cada hora después.
-# - También se puede lanzar a mano o desde una tarea de Windows (workflow_dispatch).
-# - Solo publica una vez: si la versión ya es la de todos, no hace nada.
+# NO usa "schedule" (cron): GitHub lo retrasa horas (el 5/10/2026 y el 9/10/2026 llegó con 4-8 h
+# de retraso). En su lugar se lanza el workflow al programar y el job usa el entorno
+# "publicacion-programada", cuyo "wait timer" (espera de GitHub, hasta 30 días) se ajusta antes
+# a los minutos que faltan. Al acabar la espera el job duerme los segundos que queden y publica.
+#
+# Para programar (lo hace .github/scripts/programar.sh o a mano):
+#   1. gh api -X PUT repos/OWNER/REPO/environments/publicacion-programada -F wait_timer=<minutos>
+#   2. gh workflow run publicar-programado.yml -f tag=vX.Y.Z -f hora=2026-10-20T06:00:00Z
+#
+# Solo publica una vez: si la versión ya es la de todos, no hace nada.
 # Las releases editadas con el token del workflow no disparan aviso.yml: el aviso se manda aquí.
 name: Publicación programada
 
 on:
-  schedule:
-    - cron: "5,25,45 5 9 10 *"   # 9/10, 07:05-07:45 en Galicia: esperan hasta las 08:00
-    - cron: "10 6-20 9 10 *"     # reintentos cada hora ese día, por si GitHub se retrasa
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "Versión a publicar para todos (por ejemplo v1.3.2)"
+        required: true
+      hora:
+        description: "Hora de publicación en UTC (por ejemplo 2026-10-20T06:00:00Z = 8:00 en Galicia en verano)"
+        required: true
 
 concurrency:
-  group: publicar-programado
+  group: publicar-${{ inputs.tag }}
   cancel-in-progress: false
 
 jobs:
   publicar:
     runs-on: ubuntu-latest
+    environment: publicacion-programada
+    timeout-minutes: 360
     permissions:
       contents: write
     env:
       GH_TOKEN: ${{ github.token }}
       REPO: ${{ github.repository }}
-      TAG: v1.3.1
-      PUBLICAR_A: "2026-10-09T06:00:00Z"   # viernes 9/10/2026 a las 8:00 en Galicia
+      TAG: ${{ inputs.tag }}
+      PUBLICAR_A: ${{ inputs.hora }}
     steps:
-      - name: Esperar a la hora
+      - name: Esperar a la hora exacta
         run: |
-          objetivo=$(date -d "$PUBLICAR_A" +%s); ahora=$(date +%s)
-          if [ "$ahora" -lt $((objetivo - 3600)) ]; then
-            echo "Todavía no es la hora de publicar ($PUBLICAR_A)"; echo "SALTAR=1" >> "$GITHUB_ENV"; exit 0
+          objetivo=$(date -d "$PUBLICAR_A" +%s); ahora=$(date +%s); falta=$((objetivo - ahora))
+          echo "Hora de publicación: $PUBLICAR_A (faltan $falta s)"
+          if [ "$falta" -gt 19800 ]; then
+            echo "::error::Faltan más de 5,5 horas: la espera del entorno no está bien ajustada. No se publica."
+            exit 1
           fi
-          if [ "$ahora" -lt "$objetivo" ]; then sleep $((objetivo - ahora)); fi
+          if [ "$falta" -gt 0 ]; then sleep "$falta"; fi
       - name: Publicar la versión para todos
-        if: env.SALTAR != '1'
+        id: publicar
         run: |
           estado=$(gh release view "$TAG" --repo "$REPO" --json isDraft,isPrerelease --jq '"\(.isDraft) \(.isPrerelease)"')
           if [ "$estado" = "false false" ]; then
-            echo "$TAG ya es la versión para todos: no se hace nada"; echo "SALTAR=1" >> "$GITHUB_ENV"; exit 0
+            echo "$TAG ya es la versión para todos: no se hace nada"; echo "hecho=no" >> "$GITHUB_OUTPUT"; exit 0
           fi
           gh release edit "$TAG" --repo "$REPO" --draft=false --prerelease=false --latest
-          echo "Publicada $TAG para todos"
+          echo "Publicada $TAG para todos a las $(date -u +%H:%M:%S) UTC"; echo "hecho=si" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v4
-        if: env.SALTAR != '1'
+        if: steps.publicar.outputs.hecho == 'si'
         with:
           sparse-checkout: .github/scripts
       - name: Enviar aviso a los móviles
-        if: env.SALTAR != '1'
+        if: steps.publicar.outputs.hecho == 'si'
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
         run: node .github/scripts/enviar-aviso.js
